@@ -1,3 +1,4 @@
+import os
 from typing import Any, Optional
 
 import matplotlib.pyplot as plt
@@ -7,11 +8,12 @@ import torch
 from mpmath import re
 from sklearn.externals.array_api_compat.numpy import rec
 from sklearn.metrics import accuracy_score, confusion_matrix, f1_score
-from sympy.geometry.entity import x
 from torch import nn, optim
 from torch.nn import functional as F
 from torchvision import datasets, transforms
 from tqdm import tqdm
+
+os.environ["CUDA_LAUNCH_BLOCKING"] = "1"
 
 transform = transforms.Compose([transforms.ToTensor()])
 train_dataset = datasets.MNIST(
@@ -22,12 +24,12 @@ test_dataset = datasets.MNIST(
 )
 
 train_loader = torch.utils.data.DataLoader(
-    torch.utils.data.TensorDataset(train_dataset.data.unsqueeze(1)),
+    train_dataset,
     batch_size=128,
     shuffle=True,
 )
 
-test_example = test_dataset.data[0].unsqueeze(0).unsqueeze(0).to("cuda")
+test_example = test_dataset.data[0].unsqueeze(0).unsqueeze(0).to("cuda").to(torch.float)
 
 # test_loader = torch.utils.data.DataLoader(
 #    torch.utils.data.TensorDataset(test_dataset.data.unsqueeze(1)),
@@ -96,14 +98,14 @@ def train_model(
     model = model.to(device)
     model.train()
     for e in range(epoch):
-        pbar = tqdm(enumerate(dataloader))
+        pbar = tqdm(dataloader)
         pbar.set_description(f"Training model using {device}")
-        for batch_idx, (data, target) in pbar:
-            data, target = data.to(device), target.to(device)
+        for data, _ in pbar:
+            data = data.to(device).to(torch.float)
 
             optimizer.zero_grad()
             out = model(data)
-            loss = criterion(out, target)
+            loss = criterion(out, data)
             loss.backward()
             optimizer.step()
 
@@ -142,17 +144,19 @@ def plot_images(
     fig, axes = plt.subplots(*layout)
     # Plot images
     for ax, image in zip(axes, args):
-        ax.imshow(image, cmap="gray")
+        ax.imshow(image.permute(1, 2, 0).cpu(), cmap="gray")
         ax.axis("off")
 
     plt.savefig(save_path)
-    plt.show(block=False)
+    # plt.show(block=False)
 
     return
 
 
 def part_1_2(model: nn.Module = ConvolutionalAutoEncoder()) -> ConvolutionalAutoEncoder:
     """Experiment with Conv AutoEncoder on MNIST"""
+    print("----Running 1.2----")
+
     # Train model with MSE
     criterion = nn.MSELoss()
     model = train_model(model=model, criterion=criterion)
@@ -170,6 +174,7 @@ def part_1_2(model: nn.Module = ConvolutionalAutoEncoder()) -> ConvolutionalAuto
 
 
 def part_1_3(model: nn.Module = ConvolutionalAutoEncoder()) -> ConvolutionalAutoEncoder:
+    print("----Running 1.3----")
     criterion = nn.BCELoss()
 
     class Wrapper(nn.Module):
@@ -198,6 +203,7 @@ def part_1_3(model: nn.Module = ConvolutionalAutoEncoder()) -> ConvolutionalAuto
 
 def part_1_4(*args, test_example: torch.Tensor = test_example) -> None:
     """Add noise to test image and reconstruct it. Pass in 1 or more models into args"""
+    print("----Running 1.3----")
     noise = torch.rand_like(test_example) - 0.5
     noisy_x = torch.clamp(test_example + 0.5 * noise, 0, 1).to("cuda")
 
@@ -220,6 +226,7 @@ def part_1_4(*args, test_example: torch.Tensor = test_example) -> None:
 
 def part_1_5(*args, test_example: torch.Tensor = test_example) -> None:
     """Add noise to test image and reconstruct it. Pass in 1 or more models into args"""
+    print("----Running 1.5----")
     noisy_x = torch.rand_like(test_example)
     latent_space = args[0].encoder(noisy_x)
     noisy_latent = torch.rand_like(latent_space).to("cuda")
@@ -241,7 +248,7 @@ def part_1_5(*args, test_example: torch.Tensor = test_example) -> None:
 
 
 def part_1_6(*args: ConvolutionalAutoEncoder, x1: torch.Tensor, x2: torch.Tensor):
-    # TODO: Implement this function
+    print("----Running 1.6----")
     reconstructed_images = []
     titles = []
     alpha = np.arange(0.1, 0.9, 0.1)  # Interpolation factor
