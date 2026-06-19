@@ -3,11 +3,7 @@ from typing import Any, Optional
 
 import matplotlib.pyplot as plt
 import numpy as np
-import seaborn as sns
 import torch
-from mpmath import re
-from sklearn.externals.array_api_compat.numpy import rec
-from sklearn.metrics import accuracy_score, confusion_matrix, f1_score
 from torch import nn, optim
 from torch.nn import functional as F
 from torchvision import datasets, transforms
@@ -72,11 +68,12 @@ class Decoder(nn.Module):
 
 
 class ConvolutionalAutoEncoder(nn.Module):
-    def __init__(self) -> None:
+    def __init__(self, loss_function: str = "") -> None:
         super().__init__()
 
         self.encoder = Encoder()
         self.decoder = Decoder()
+        self.used_loss = loss_function
 
     def forward(self, x):
         x = self.encoder(x)
@@ -143,17 +140,23 @@ def plot_images(
 
     fig, axes = plt.subplots(*layout)
     # Plot images
-    for ax, image in zip(axes, args):
+    for ax, image, title in zip(axes, args, titles):
+        if image.dim() == 4:
+            image = image.squeeze(0)  # quick fix
         ax.imshow(image.permute(1, 2, 0).cpu(), cmap="gray")
+        ax.set_title(title)
         ax.axis("off")
 
+    plt.tight_layout()
     plt.savefig(save_path)
     # plt.show(block=False)
 
     return
 
 
-def part_1_2(model: nn.Module = ConvolutionalAutoEncoder()) -> ConvolutionalAutoEncoder:
+def part_1_2(
+    model: nn.Module = ConvolutionalAutoEncoder(loss_function="MSE"),
+) -> ConvolutionalAutoEncoder:
     """Experiment with Conv AutoEncoder on MNIST"""
     print("----Running 1.2----")
 
@@ -161,19 +164,20 @@ def part_1_2(model: nn.Module = ConvolutionalAutoEncoder()) -> ConvolutionalAuto
     criterion = nn.MSELoss()
     model = train_model(model=model, criterion=criterion)
 
-    # Visualize reconstructed image
-    reconstructed_image, test_example = test_model(model)
-
+    test_example, reconstructed_image = test_model(model)
     plot_images(
         reconstructed_image,
         test_example,
         layout=(1, 2),
+        titles=["Reconstructed", "Original"],
         save_path="images/part_1_2.png",
     )
     return model
 
 
-def part_1_3(model: nn.Module = ConvolutionalAutoEncoder()) -> ConvolutionalAutoEncoder:
+def part_1_3(
+    model: nn.Module = ConvolutionalAutoEncoder(loss_function="BCE"),
+) -> ConvolutionalAutoEncoder:
     print("----Running 1.3----")
     criterion = nn.BCELoss()
 
@@ -187,44 +191,48 @@ def part_1_3(model: nn.Module = ConvolutionalAutoEncoder()) -> ConvolutionalAuto
             return F.sigmoid(self.model(x))
 
     model = Wrapper()
-    model = train_model(model, criterion)
+    model = train_model(model, criterion).model
 
-    # Visualize reconstructed image
-    reconstructed_image, test_example = test_model(model)
+    test_example, reconstructed_image = test_model(model)
     plot_images(
         reconstructed_image.cpu(),
         test_example.cpu(),
         layout=(1, 2),
+        titles=["Reconstructed", "Original"],
         save_path="images/part_1_3.png",
     )
 
     return model
 
 
-def part_1_4(*args, test_example: torch.Tensor = test_example) -> None:
+def part_1_4(
+    *args: ConvolutionalAutoEncoder, test_example: torch.Tensor = test_example
+) -> None:
     """Add noise to test image and reconstruct it. Pass in 1 or more models into args"""
-    print("----Running 1.3----")
+    print("----Running 1.4----")
     noise = torch.rand_like(test_example) - 0.5
     noisy_x = torch.clamp(test_example + 0.5 * noise, 0, 1).to("cuda")
 
     reconstructed_images = set()
-    titles = set()
+    titles = []
     for model in args:
-        reconstructed_image = model(noisy_x)
+        _, reconstructed_image = test_model(model=model, test_example=noisy_x)
         reconstructed_images.add(reconstructed_image.cpu())
-        titles.add(model.__class__.__name__)
+        titles.append(model.used_loss)
 
     plot_images(
         test_example,
         *reconstructed_images,
-        titles=["Original", *titles],
+        titles=["Original"] + titles,
         layout=(1, len(args) + 1),
         save_path="images/part_1_4.png",
     )
     return None
 
 
-def part_1_5(*args, test_example: torch.Tensor = test_example) -> None:
+def part_1_5(
+    *args: ConvolutionalAutoEncoder, test_example: torch.Tensor = test_example
+) -> None:
     """Add noise to test image and reconstruct it. Pass in 1 or more models into args"""
     print("----Running 1.5----")
     noisy_x = torch.rand_like(test_example)
@@ -232,15 +240,15 @@ def part_1_5(*args, test_example: torch.Tensor = test_example) -> None:
     noisy_latent = torch.rand_like(latent_space).to("cuda")
 
     reconstructed_images = set()
-    titles = set()
+    titles = []
     for model in args:
         reconstructed_image = model.decoder(noisy_latent)
-        reconstructed_images.add(reconstructed_image.cpu())
-        titles.add(model.__class__.__name__)
+        reconstructed_images.add(reconstructed_image.cpu().detach())
+        titles.append(model.used_loss)
 
     plot_images(
         *reconstructed_images,
-        titles=[*titles],
+        titles=titles,
         layout=(1, len(args)),
         save_path="images/part_1_5.png",
     )
@@ -251,9 +259,9 @@ def part_1_6(*args: ConvolutionalAutoEncoder, x1: torch.Tensor, x2: torch.Tensor
     print("----Running 1.6----")
     reconstructed_images = []
     titles = []
-    alpha = np.arange(0.1, 0.9, 0.1)  # Interpolation factor
-    x1 = x1.repeat(len(alpha))
-    x2 = x2.repeat(len(alpha))
+    alpha = torch.arange(0.1, 0.9, 0.1)  # Interpolation factor
+    x1 = x1.expand(len(alpha), -1, -1, -1)
+    x2 = x2.expand(len(alpha), -1, -1, -1)
 
     for model in args:
         z1 = model.encoder(x1)
@@ -267,7 +275,7 @@ def part_1_6(*args: ConvolutionalAutoEncoder, x1: torch.Tensor, x2: torch.Tensor
 
     plot_images(
         *reconstructed_images,
-        titles=[*titles],
+        titles=titles,
         layout=(2, len(args)),
         save_path="images/part_1_6.png",
     )
@@ -280,8 +288,8 @@ if __name__ == "__main__":
     part_1_4(mse_cae_model, bse_cae_model)
     part_1_5(mse_cae_model, bse_cae_model)
 
-    x1 = test_dataset.data[0].unsqueeze(0).unsqueeze(0).to("cuda")
-    x2 = test_dataset.data[1].unsqueeze(0).unsqueeze(0).to("cuda")
+    x1 = test_dataset.data[0].unsqueeze(0).unsqueeze(0).to("cuda").to(torch.float)
+    x2 = test_dataset.data[1].unsqueeze(0).unsqueeze(0).to("cuda").to(torch.float)
 
     part_1_6(mse_cae_model, bse_cae_model, x1=x1, x2=x2)
 
