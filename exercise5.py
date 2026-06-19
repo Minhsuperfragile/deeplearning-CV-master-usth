@@ -1,10 +1,9 @@
 import os
-from typing import Any, Optional
+from typing import Optional
 
 import matplotlib.pyplot as plt
-import numpy as np
 import torch
-from torch import nn, optim
+from torch import nn
 from torch.nn import functional as F
 from torchvision import datasets, transforms
 from tqdm import tqdm
@@ -121,7 +120,7 @@ def test_model(
 
 
 def plot_images(
-    *args, layout=(1, 2), titles=[""], save_path="./images/plot.png"
+    *args, layout: tuple[int, int] = (1, 2), titles=[""], save_path="./images/plot.png"
 ) -> None:
     """Plot multiple images
     Args:
@@ -133,12 +132,9 @@ def plot_images(
     """
     if len(titles) < len(args):
         titles = [f"Image {i}" for i in range(len(args))]
-    if len(args) > 1:
-        layout = (1, len(args))
-    else:
-        layout = (1, 1)
 
     fig, axes = plt.subplots(*layout)
+    axes = axes.flatten()
     # Plot images
     for ax, image, title in zip(axes, args, titles):
         if image.dim() == 4:
@@ -258,25 +254,25 @@ def part_1_5(
 def part_1_6(*args: ConvolutionalAutoEncoder, x1: torch.Tensor, x2: torch.Tensor):
     print("----Running 1.6----")
     reconstructed_images = []
-    titles = []
-    alpha = torch.arange(0.1, 0.9, 0.1)  # Interpolation factor
-    x1 = x1.expand(len(alpha), -1, -1, -1)
-    x2 = x2.expand(len(alpha), -1, -1, -1)
+    alpha = torch.arange(0.1, 1.0, 0.1).to("cuda")  # Interpolation factor
+    batch = len(alpha)
+    x1 = x1.expand(batch, -1, -1, -1)
+    x2 = x2.expand(batch, -1, -1, -1)
 
+    titles = ["data"]
     for model in args:
         z1 = model.encoder(x1)
         z2 = model.encoder(x2)
         # Interpolate between z1 and z2
-        z_interp = (1 - alpha) * z1 + alpha * z2
+        z_interp = (1 - alpha).unsqueeze(1) * z1 + alpha.unsqueeze(1) * z2
         # Decode the interpolated latent vector
         reconstructed_image = model.decoder(z_interp)
-        reconstructed_images.append(reconstructed_image.cpu())
-        titles.append(model.__class__.__name__)
+        reconstructed_images.extend(list(reconstructed_image.cpu().detach()))
 
     plot_images(
         *reconstructed_images,
         titles=titles,
-        layout=(2, len(args)),
+        layout=(len(args), batch),
         save_path="images/part_1_6.png",
     )
     return None
