@@ -1,5 +1,5 @@
 import os
-from typing import Optional
+from typing import Any, Optional
 
 import matplotlib.pyplot as plt
 import torch
@@ -41,7 +41,7 @@ class Encoder(nn.Module):
         self.conv2 = nn.Conv2d(32, 64, 4, 2, 1)
         self.fc = nn.Linear(64 * 7 * 7, 10)
 
-    def forward(self, x):
+    def forward(self, x) -> torch.Tensor:
         x = F.relu(self.conv1(x))
         x = F.relu(self.conv2(x))
         x = x.flatten(start_dim=1)
@@ -57,7 +57,7 @@ class Decoder(nn.Module):
         self.conv1 = nn.ConvTranspose2d(64, 32, 4, 2, 1)
         self.conv2 = nn.ConvTranspose2d(32, 1, 4, 2, 1)
 
-    def forward(self, x):
+    def forward(self, x) -> torch.Tensor:
         batch_size = x.shape[0]
         x = F.relu(self.fc(x))
         x = x.reshape((batch_size, 64, 7, 7))
@@ -74,7 +74,7 @@ class ConvolutionalAutoEncoder(nn.Module):
         self.decoder = Decoder()
         self.used_loss = loss_function
 
-    def forward(self, x):
+    def forward(self, x) -> torch.Tensor:
         x = self.encoder(x)
         x = self.decoder(x)
         return x
@@ -259,7 +259,7 @@ def part_1_6(*args: ConvolutionalAutoEncoder, x1: torch.Tensor, x2: torch.Tensor
     x1 = x1.expand(batch, -1, -1, -1)
     x2 = x2.expand(batch, -1, -1, -1)
 
-    titles = ["data"]
+    titles = [str(round(float(i), 1)) for i in list(alpha.expand(2, -1).flatten())]
     for model in args:
         z1 = model.encoder(x1)
         z2 = model.encoder(x2)
@@ -284,9 +284,51 @@ if __name__ == "__main__":
     part_1_4(mse_cae_model, bse_cae_model)
     part_1_5(mse_cae_model, bse_cae_model)
 
-    x1 = test_dataset.data[0].unsqueeze(0).unsqueeze(0).to("cuda").to(torch.float)
-    x2 = test_dataset.data[1].unsqueeze(0).unsqueeze(0).to("cuda").to(torch.float)
+    indices_1 = (test_dataset.targets == 1).nonzero(as_tuple=True)[0]
+    indices_8 = (test_dataset.targets == 8).nonzero(as_tuple=True)[0]
+
+    x1 = (
+        test_dataset.data[indices_1[0]]
+        .unsqueeze(0)
+        .unsqueeze(0)
+        .to("cuda")
+        .to(torch.float)
+    )
+    x2 = (
+        test_dataset.data[indices_8[0]]
+        .unsqueeze(0)
+        .unsqueeze(0)
+        .to("cuda")
+        .to(torch.float)
+    )
 
     part_1_6(mse_cae_model, bse_cae_model, x1=x1, x2=x2)
 
     print("All parts completed successfully!")
+
+
+# VAE
+class VariationalAutoEncoder(nn.Module):
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+
+        self.encoder = Encoder()
+        self.decoder = Decoder()
+
+    def encode(self, x):
+        z: torch.Tensor = self.encoder(x)
+        return z.mean(dim=1), torch.log(torch.var(x, dim=1))  # (batch, vector)
+
+    def sampling(self, mean, var_log):
+        batch = mean.shape[0]
+        z = mean + var_log * torch.randn((batch, 10))
+        return z
+
+    def decode(self, z):
+        return self.decoder(z)
+
+    def forward(self, x):
+        mu, var = self.encode(x)
+        z = self.sampling(mu, var)
+        out = self.decode(z)
+        return out
