@@ -3,6 +3,7 @@ from typing import Any, Optional
 
 import matplotlib.pyplot as plt
 import torch
+from numpy.matlib import save
 from torch import nn
 from torch.nn import functional as F
 from torchvision import datasets, transforms
@@ -116,6 +117,9 @@ def test_model(
     model.eval()
     with torch.no_grad():
         reconstructed_image = model(test_example)
+
+        if isinstance(reconstructed_image, tuple):
+            reconstructed_image = reconstructed_image[0]
     return test_example.squeeze(0), reconstructed_image.squeeze(0)
 
 
@@ -278,35 +282,6 @@ def part_1_6(*args: ConvolutionalAutoEncoder, x1: torch.Tensor, x2: torch.Tensor
     return None
 
 
-# if __name__ == "__main__":
-#     mse_cae_model: ConvolutionalAutoEncoder = part_1_2()
-#     bse_cae_model: ConvolutionalAutoEncoder = part_1_3()
-#     part_1_4(mse_cae_model, bse_cae_model)
-#     part_1_5(mse_cae_model, bse_cae_model)
-
-#     indices_1 = (test_dataset.targets == 1).nonzero(as_tuple=True)[0]
-#     indices_8 = (test_dataset.targets == 8).nonzero(as_tuple=True)[0]
-
-#     x1 = (
-#         test_dataset.data[indices_1[0]]
-#         .unsqueeze(0)
-#         .unsqueeze(0)
-#         .to("cuda")
-#         .to(torch.float)
-#     )
-#     x2 = (
-#         test_dataset.data[indices_8[0]]
-#         .unsqueeze(0)
-#         .unsqueeze(0)
-#         .to("cuda")
-#         .to(torch.float)
-#     )
-
-#     part_1_6(mse_cae_model, bse_cae_model, x1=x1, x2=x2)
-
-#     print("All parts completed successfully!")
-
-
 # VAE
 class VariationalAutoEncoder(nn.Module):
     def __init__(self, *args: Any, **kwargs: Any) -> None:
@@ -328,7 +303,7 @@ class VariationalAutoEncoder(nn.Module):
     def sampling(self, mean, var_log):
         """Sampling a latent distribution from mu and var vector"""
         std = torch.exp(0.5 * var_log)
-        z = mean + var_log * torch.randn_like(std)
+        z = mean + std * torch.randn_like(std)
         return z
 
     def decode(self, z):
@@ -338,22 +313,168 @@ class VariationalAutoEncoder(nn.Module):
         mu, var = self.encode(x)
         z = self.sampling(mu, var)
         out = self.decode(z)
-        return out
+        return out, mu, var
+
+
+def train_vae(
+    model: VariationalAutoEncoder,
+    dataloader: torch.utils.data.DataLoader = train_loader,
+    epoch=10,
+    device="cuda",
+) -> VariationalAutoEncoder:
+    optimizer = torch.optim.Adam(params=model.parameters(), lr=1e-3)
+    model = model.to(device)
+    model.train()
+
+    for e in range(epoch):
+        pbar = tqdm(dataloader)
+        pbar.set_description(f"VAE Training Epoch {e + 1}")
+        for data, _ in pbar:
+            data = data.to(device).to(torch.float)
+            optimizer.zero_grad()
+
+            # 1. Forward pass
+            out, mu, var_log = model(data)
+
+            # 2. Reconstruction Loss (MSE between original and reconstructed)
+            recon_loss = F.mse_loss(out, data, reduction="sum")
+
+            # 3. KL Divergence Loss (The VAE specific formula)
+            # KL = -0.5 * sum(1 + log_var - mu^2 - exp(log_var))
+            kl_loss = -0.5 * torch.sum(1 + var_log - mu.pow(2) - var_log.exp())
+
+            # Total loss = Reconstruction + KL
+            loss = recon_loss + kl_loss
+
+            loss.backward()
+            optimizer.step()
+
+            pbar.set_description(f"Loss: {loss.item() / data.size(0):.4f}")
+
+    return model
 
 
 def part_2_2(
     model: VariationalAutoEncoder = VariationalAutoEncoder(),
 ) -> VariationalAutoEncoder:
-    criterion = nn.MSELoss()
-    model = train_model(model, criterion)
+    print("----Running 2.2----")
+    model = train_vae(model)
+    test_example, reconstructed_image = test_model(model)
+    with torch.no_grad():
+        random_prior = torch.randn((1, 10)).to("cuda")
+        prior_reconstruction = model.decode(random_prior)
 
+    plot_images(
+        test_example,
+        reconstructed_image,
+        prior_reconstruction,
+        titles=["Original", "VAE Reconstructed", "Random Prior"],
+        layout=(1, 3),
+        save_path="./images/part_2_2.png",
+    )
     return model
 
 
+def part_2_3(model: VariationalAutoEncoder, x1: torch.Tensor, x2: torch.Tensor):
+    # Latent space interpolation
+    print("----Running 2.3----")
+    reconstructed_images = []
+    alpha = torch.arange(0.1, 1.0, 0.1).to("cuda")  # Interpolation factor
+    batch = len(alpha)
+    x1 = x1.expand(batch, -1, -1, -1)
+    x2 = x2.expand(batch, -1, -1, -1)
+
+    titles = [str(round(float(i), 1)) for i in list(alpha.expand(2, -1).flatten())]
+    mu1, var1 = model.encode(x1)
+    mu2, var2 = model.encode(x2)
+    # Interpolate between z1 and z2
+    mu_interp = (1 - alpha).unsqueeze(1) * mu1 + alpha.unsqueeze(1) * mu2
+    var_interp = (1 - alpha).unsqueeze(1) * var1 + alpha.unsqueeze(1) * var2
+    # Decode the interpolated latent vector
+    z = model.sampling(mu_interp, var_interp)
+    reconstructed_image = model.decode(z)
+    reconstructed_images.extend(list(reconstructed_image.cpu().detach()))
+
+    plot_images(
+        *reconstructed_images,
+        titles=titles,
+        layout=(3, 3),
+        save_path="images/part_2_3.png",
+    )
+    return None
+
+
+def part_3_2(
+    vae_model: VariationalAutoEncoder,
+    ae_model: ConvolutionalAutoEncoder,
+    test_example: torch.Tensor = test_example,
+):
+    """VAE on masked image"""
+    print("----Running 3.2----")
+    mask = torch.ones_like(test_example)
+    mask[:, :, 0 : (28 // 4), 0 : (28 // 4)] = 0
+    masked_image = test_example * mask
+
+    ae_reconstructed_image = ae_model(masked_image)
+    vae_reconstructed_image = vae_model(masked_image)
+
+    plot_images(
+        test_example,
+        masked_image,
+        ae_reconstructed_image,
+        vae_reconstructed_image,
+        layout=(2, 2),
+        titles=["Original", "Masked", "Autoencoder", "VAE"],
+        save_path="images/part_3_2.png",
+    )
+    return None
+
+
 if __name__ == "__main__":
-    model = VariationalAutoEncoder().to("cuda")
-    test_batch = test_example.expand(16, -1, -1, -1)
-    mu, lv = model.encode(test_batch)
-    print(mu.shape, lv.shape)
-    z = model.sampling(mu, lv)
-    print(z.shape)
+    mse_cae_model: ConvolutionalAutoEncoder = part_1_2()
+    bse_cae_model: ConvolutionalAutoEncoder = part_1_3()
+    part_1_4(mse_cae_model, bse_cae_model)
+    part_1_5(mse_cae_model, bse_cae_model)
+
+    indices_1 = (test_dataset.targets == 1).nonzero(as_tuple=True)[0]
+    indices_8 = (test_dataset.targets == 8).nonzero(as_tuple=True)[0]
+
+    x1 = (
+        test_dataset.data[indices_1[0]]
+        .unsqueeze(0)
+        .unsqueeze(0)
+        .to("cuda")
+        .to(torch.float)
+    )
+    x2 = (
+        test_dataset.data[indices_8[0]]
+        .unsqueeze(0)
+        .unsqueeze(0)
+        .to("cuda")
+        .to(torch.float)
+    )
+
+    part_1_6(mse_cae_model, bse_cae_model, x1=x1, x2=x2)
+    # -----------------------------------------------------------
+    vae_model = part_2_2()
+    indices_1 = (test_dataset.targets == 1).nonzero(as_tuple=True)[0]
+    indices_8 = (test_dataset.targets == 8).nonzero(as_tuple=True)[0]
+
+    x1 = (
+        test_dataset.data[indices_1[0]]
+        .unsqueeze(0)
+        .unsqueeze(0)
+        .to("cuda")
+        .to(torch.float)
+    )
+    x2 = (
+        test_dataset.data[indices_8[0]]
+        .unsqueeze(0)
+        .unsqueeze(0)
+        .to("cuda")
+        .to(torch.float)
+    )
+
+    part_2_3(model=vae_model, x1=x1, x2=x2)
+    # --------------------------------------------------------------
+    part_3_2(vae_model=vae_model, ae_model=mse_cae_model)
