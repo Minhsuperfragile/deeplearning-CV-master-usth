@@ -278,33 +278,33 @@ def part_1_6(*args: ConvolutionalAutoEncoder, x1: torch.Tensor, x2: torch.Tensor
     return None
 
 
-if __name__ == "__main__":
-    mse_cae_model: ConvolutionalAutoEncoder = part_1_2()
-    bse_cae_model: ConvolutionalAutoEncoder = part_1_3()
-    part_1_4(mse_cae_model, bse_cae_model)
-    part_1_5(mse_cae_model, bse_cae_model)
+# if __name__ == "__main__":
+#     mse_cae_model: ConvolutionalAutoEncoder = part_1_2()
+#     bse_cae_model: ConvolutionalAutoEncoder = part_1_3()
+#     part_1_4(mse_cae_model, bse_cae_model)
+#     part_1_5(mse_cae_model, bse_cae_model)
 
-    indices_1 = (test_dataset.targets == 1).nonzero(as_tuple=True)[0]
-    indices_8 = (test_dataset.targets == 8).nonzero(as_tuple=True)[0]
+#     indices_1 = (test_dataset.targets == 1).nonzero(as_tuple=True)[0]
+#     indices_8 = (test_dataset.targets == 8).nonzero(as_tuple=True)[0]
 
-    x1 = (
-        test_dataset.data[indices_1[0]]
-        .unsqueeze(0)
-        .unsqueeze(0)
-        .to("cuda")
-        .to(torch.float)
-    )
-    x2 = (
-        test_dataset.data[indices_8[0]]
-        .unsqueeze(0)
-        .unsqueeze(0)
-        .to("cuda")
-        .to(torch.float)
-    )
+#     x1 = (
+#         test_dataset.data[indices_1[0]]
+#         .unsqueeze(0)
+#         .unsqueeze(0)
+#         .to("cuda")
+#         .to(torch.float)
+#     )
+#     x2 = (
+#         test_dataset.data[indices_8[0]]
+#         .unsqueeze(0)
+#         .unsqueeze(0)
+#         .to("cuda")
+#         .to(torch.float)
+#     )
 
-    part_1_6(mse_cae_model, bse_cae_model, x1=x1, x2=x2)
+#     part_1_6(mse_cae_model, bse_cae_model, x1=x1, x2=x2)
 
-    print("All parts completed successfully!")
+#     print("All parts completed successfully!")
 
 
 # VAE
@@ -313,15 +313,22 @@ class VariationalAutoEncoder(nn.Module):
         super().__init__(*args, **kwargs)
 
         self.encoder = Encoder()
+        self.fc_mu = nn.Linear(10, 10, bias=False)
+        self.fc_var = nn.Linear(10, 10, bias=False)
         self.decoder = Decoder()
 
     def encode(self, x):
+        """Return a mu,var vector of size (batch, latent dim)"""
         z: torch.Tensor = self.encoder(x)
-        return z.mean(dim=1), torch.log(torch.var(x, dim=1))  # (batch, vector)
+        mu = self.fc_mu(z)
+        var = self.fc_var(z)
+
+        return mu, var  # (batch, vector)
 
     def sampling(self, mean, var_log):
-        batch = mean.shape[0]
-        z = mean + var_log * torch.randn((batch, 10))
+        """Sampling a latent distribution from mu and var vector"""
+        std = torch.exp(0.5 * var_log)
+        z = mean + var_log * torch.randn_like(std)
         return z
 
     def decode(self, z):
@@ -332,3 +339,21 @@ class VariationalAutoEncoder(nn.Module):
         z = self.sampling(mu, var)
         out = self.decode(z)
         return out
+
+
+def part_2_2(
+    model: VariationalAutoEncoder = VariationalAutoEncoder(),
+) -> VariationalAutoEncoder:
+    criterion = nn.MSELoss()
+    model = train_model(model, criterion)
+
+    return model
+
+
+if __name__ == "__main__":
+    model = VariationalAutoEncoder().to("cuda")
+    test_batch = test_example.expand(16, -1, -1, -1)
+    mu, lv = model.encode(test_batch)
+    print(mu.shape, lv.shape)
+    z = model.sampling(mu, lv)
+    print(z.shape)
