@@ -3,6 +3,7 @@ from typing import Any, Optional, Tuple
 
 import matplotlib.pyplot as plt
 import torch
+from mpmath import identify
 from numpy.matlib import save
 from torch import nn
 from torch.nn import functional as F
@@ -309,8 +310,9 @@ class VariationalAutoEncoder(nn.Module):
 
 
 class VAE_Loss(nn.Module):
-    def __init__(self, *args: Any, **kwargs: Any) -> None:
+    def __init__(self, lambda_: float = 1.0, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
+        self.lambda_ = lambda_
 
     def forward(self, tar, rec, mu, var_log):
         recon_loss = F.mse_loss(rec, tar, reduction="sum")
@@ -320,7 +322,7 @@ class VAE_Loss(nn.Module):
         kl_loss = -0.5 * torch.sum(1 + var_log - mu.pow(2) - var_log.exp())
 
         # Total loss = Reconstruction + KL
-        loss = recon_loss + kl_loss
+        loss = recon_loss + kl_loss * self.lambda_
         return loss
 
 
@@ -431,16 +433,19 @@ def apply_random_mask(image, square_size=5):
 class VAE_Siamese_Loss(nn.Module):
     def __init__(
         self,
+        lambda_=0.5,
+        gamma=0.5,
     ):
         super().__init__()
-        self.vae_loss = VAE_Loss()
+        self.vae_loss = VAE_Loss(lambda_=lambda_)
+        self.gamma = 0.5
 
     def forward(self, rec, out, mu, log_var, mum, log_varm):
         loss = self.vae_loss(out, rec, mu, log_var)
         loss_siamese = torch.linalg.vector_norm(
             mu - mum, ord=2, dim=1
         ) + torch.linalg.vector_norm(log_var - log_varm, ord=2, dim=1)
-        return loss + loss_siamese
+        return loss + loss_siamese.sum()
 
 
 class VAESiamese(nn.Module):
@@ -457,12 +462,13 @@ class VAESiamese(nn.Module):
 
 
 def part_4_4(vae_model: VariationalAutoEncoder, cae_model: ConvolutionalAutoEncoder):
+    print("----Running 4.4----")
     model: VAESiamese = train_model(model=VAESiamese(), criterion=VAE_Siamese_Loss())
     with torch.no_grad():
         masked_example = apply_random_mask(test_example)
         rec_cae = cae_model(masked_example)
-        rec_vae, _, _ = vae_model(masked_example)
-        rec_vaes, _, _ = model(masked_example)
+        rec_vae, *_ = vae_model(masked_example)
+        rec_vaes, *_ = model(masked_example)
 
     plot_images(
         test_example,
@@ -477,35 +483,44 @@ def part_4_4(vae_model: VariationalAutoEncoder, cae_model: ConvolutionalAutoEnco
     return model
 
 
+def part_4_5(model: VAESiamese, test_example: torch.Tensor = test_example):
+    print("----Running 4.5----")
+    # Latent space interpolation
+
+    # Large mask
+
+    return
+
+
 if __name__ == "__main__":
     mse_cae_model: ConvolutionalAutoEncoder = part_1_2()
-    bse_cae_model: ConvolutionalAutoEncoder = part_1_3()
-    part_1_4(mse_cae_model, bse_cae_model)
-    part_1_5(mse_cae_model, bse_cae_model)
+    # bse_cae_model: ConvolutionalAutoEncoder = part_1_3()
+    # part_1_4(mse_cae_model, bse_cae_model)
+    # part_1_5(mse_cae_model, bse_cae_model)
 
-    indices_1 = (test_dataset.targets == 1).nonzero(as_tuple=True)[0]
-    indices_8 = (test_dataset.targets == 8).nonzero(as_tuple=True)[0]
+    # indices_1 = (test_dataset.targets == 1).nonzero(as_tuple=True)[0]
+    # indices_8 = (test_dataset.targets == 8).nonzero(as_tuple=True)[0]
 
-    x1 = (
-        test_dataset.data[indices_1[0]]
-        .unsqueeze(0)
-        .unsqueeze(0)
-        .to("cuda")
-        .to(torch.float)
-    )
-    x2 = (
-        test_dataset.data[indices_8[0]]
-        .unsqueeze(0)
-        .unsqueeze(0)
-        .to("cuda")
-        .to(torch.float)
-    )
+    # x1 = (
+    #     test_dataset.data[indices_1[0]]
+    #     .unsqueeze(0)
+    #     .unsqueeze(0)
+    #     .to("cuda")
+    #     .to(torch.float)
+    # )
+    # x2 = (
+    #     test_dataset.data[indices_8[0]]
+    #     .unsqueeze(0)
+    #     .unsqueeze(0)
+    #     .to("cuda")
+    #     .to(torch.float)
+    # )
 
-    part_1_6(mse_cae_model, bse_cae_model, x1=x1, x2=x2)
-    # -----------------------------------------------------------
+    # part_1_6(mse_cae_model, bse_cae_model, x1=x1, x2=x2)
+    # # -----------------------------------------------------------
     vae_model = part_2_2()
-    part_2_3(model=vae_model, x1=x1, x2=x2)
-    # --------------------------------------------------------------
-    part_3_2(vae_model=vae_model, ae_model=mse_cae_model)
+    # part_2_3(model=vae_model, x1=x1, x2=x2)
+    # # --------------------------------------------------------------
+    # part_3_2(vae_model=vae_model, ae_model=mse_cae_model)
     # --------------------------------------------------------------
     vaes_model = part_4_4(vae_model, mse_cae_model)
